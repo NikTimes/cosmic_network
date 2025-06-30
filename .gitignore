@@ -1,0 +1,5 @@
+*.csv
+.~lock.cmb_dataset.csv#
+planck_tt.txt
+saha_equation.py
+temperature_spectrum.py

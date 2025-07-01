@@ -44,4 +44,19 @@ def generate_cmb_dataset(omega_b_range=(0.010, 0.030), num_points=300,
     return df
 
 
-generate_cmb_dataset(num_points=3000, output_file="bbbetter_noodles.csv")
+"""
+# generate_cmb_dataset(num_points=3000, output_file="bbbetter_noodles.csv")
+# Load the dataset
+df = pd.read_csv("better_noodles.csv")
+
+# Rename the first column to 'omega_b'
+df.columns.values[0] = "omega_b"
+
+# Optional: Rename the rest of the columns to 'ell_0', 'ell_1', ..., 'ell_2500'
+df.columns = ["omega_b"] + [f"ell_{i}" for i in range(1, df.shape[1])]
+
+# Save to a new CSV file (optional)
+df.to_csv("formatted_better_noodles.csv", index=False)
+
+# Preview the first few rows
+"""

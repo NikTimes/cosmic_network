@@ -5,8 +5,9 @@ from smt.sampling_methods import LHS
 import torch
 
 
+
 def build_dataset(
-        omega_b_range   = [0.010, 0.040],
+        omega_b_range   = [0.001, 0.040],
         omega_cdm_range = [0.001, 0.99],
         l_max           = 2500,
         num_points      = 10_000,        
@@ -39,6 +40,12 @@ def build_dataset(
             omega_cdm   = float(omega_cdm)
             omega_lam   = 1 - omega_b - omega_cdm
             
+            if omega_lam < 0:
+                print(f"Skipping unphysical sample {i}: Ω_b={omega_b:.4f}, Ω_cdm={omega_cdm:.4f}, Ω_Λ={omega_lam:.4f}")
+                continue
+            
+            bbn_path = "/home/enric/Repositories/class_public/external/bbn/sBBN_2025.dat"
+            
             parameters  = {
                 
                 "Omega_b"       : omega_b, 
@@ -51,7 +58,8 @@ def build_dataset(
                 "tau_reio"      : 0.054,
                 "lensing"       : "no",
                 "output"        : "tCl",
-                "l_max_scalars" : l_max
+                "l_max_scalars" : l_max,
+                "YHe"           : 0.2471      
                 }
             
             try:

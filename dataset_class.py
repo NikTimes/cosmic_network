@@ -29,7 +29,7 @@ def build_dataset(
         d_omega_b       = h5.create_dataset("omega_b", shape=(num_points,), dtype="f4")
         d_omega_cdm     = h5.create_dataset("omega_cdm", shape=(num_points,), dtype="f4")
         d_omega_lambda  = h5.create_dataset("omega_lambda", shape=(num_points,), dtype="f4")
-        d_logClTT       = h5.create_datase("log_C_ell", shape=(num_points, num_ell),
+        d_logClTT       = h5.create_dataset("log_C_ell", shape=(num_points, num_ell),
                                            dtype="f4", compression="gzip", chunks=True)
         d_ell           = h5.create_dataset("ell", data=ells, dtype="i4")
         
@@ -37,13 +37,13 @@ def build_dataset(
             
             omega_b     = float(omega_b)
             omega_cdm   = float(omega_cdm)
-            omega_lam   = 1 - omega_b - omega_cdm,
+            omega_lam   = 1 - omega_b - omega_cdm
             
             parameters  = {
                 
                 "Omega_b"       : omega_b, 
                 "Omega_cdm"     : omega_cdm, 
-                "Omega_lambda"  : omega_lam,
+                # "Omega_lambda"  : omega_lam,
                 "Omega_k"       : 0.0,
                 "h"             : 0.67810,
                 "A_s"           : 2.1e-9,
@@ -112,21 +112,5 @@ class CMBdataset(torch.utils.data.Dataset):
        y = torch.tensor(log_cl, dtype=torch.float32)
 
        return x, y
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-    
+   
+build_dataset()

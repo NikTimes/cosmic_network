@@ -1,0 +1,23 @@
+# sweep.yaml  ───────────────────────────────────────────
+program: training_loopv2.py        # ← entry-point script
+method: bayes                  # Bayesian optimisation
+metric:
+  name: val_loss               # what to minimise
+  goal: minimize
+
+parameters:
+  learning_rate:
+    values: [0.0005, 0.001, 0.002]     # tried exactly
+  batch_size:
+    values: [16, 32, 64]
+  hidden_dim:
+    values: [64, 128, 256]
+  hidden_layers:
+    values: [2, 3, 4]
+  patience:
+    value: 25                          # constant for every run
+
+# optional: limit total runs
+early_terminate:
+  type: hyperband                     # or "none"
+  min_iter: 20

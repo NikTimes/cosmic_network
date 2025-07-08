@@ -22,7 +22,7 @@ def build_dataset(
     sampler = LHS(xlimits=x_limits)
     samples = sampler(num_points)
     
-    ells = np.arange(l_max + 1)
+    ells    = np.arange(l_max + 1)
     num_ell = len(ells)
     
     with h5py.File(out_path,"w") as h5:
@@ -90,9 +90,9 @@ class CMBdataset(torch.utils.data.Dataset):
     
     def __init__(self, h5_path, ell_slice=None):
         
-        self.h5_path = h5_path
-        self.ell_slice = ell_slice  # optional: ℓ=2 to 800
-        self._h5 = None
+        self.h5_path    = h5_path
+        self.ell_slice  = ell_slice  # optional: ℓ=2 to 800
+        self._h5        = None
         
     @property
     def h5(self):
@@ -111,14 +111,12 @@ class CMBdataset(torch.utils.data.Dataset):
        omega_cdm    = self.h5["omega_cdm"][index]
        omega_lambda = self.h5["omega_lambda"][index]
 
-      
-       log_cl = self.h5["log_C_ll"][index]
+       log_cl       = self.h5["log_C_ell"][index]
+       
        if self.ell_slice:
            log_cl = log_cl[self.ell_slice]
            
-       x = torch.tensor([omega_b, omega_cdm, omega_lambda], dtype=torch.float32)  
+       x = torch.tensor([omega_b, omega_cdm], dtype=torch.float32)  
        y = torch.tensor(log_cl, dtype=torch.float32)
 
        return x, y
-   
-build_dataset()

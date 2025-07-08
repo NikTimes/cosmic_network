@@ -98,7 +98,7 @@ class CMBdataset(torch.utils.data.Dataset):
     def h5(self):
         
         if self._h5 is None:
-            self._h5 = h5py.File(self.h5_path, "r", swrm=True)
+            self._h5 = h5py.File(self.h5_path, "r", swmr=True)
         
         return self._h5
             
@@ -112,7 +112,7 @@ class CMBdataset(torch.utils.data.Dataset):
        omega_lambda = self.h5["omega_lambda"][index]
 
       
-       log_cl = self.h5["log_C_ll"][[index]]
+       log_cl = self.h5["log_C_ll"][index]
        if self.ell_slice:
            log_cl = log_cl[self.ell_slice]
            

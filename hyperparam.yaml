@@ -1,0 +1,15 @@
+program: training_loopv2.py
+project: hyper_parameter_cmb
+method: bayes
+
+metric:
+  name: val_loss
+  goal: minimize
+
+parameters:
+  learning_rate: {values: [0.0001, 0.0002, 0.0003, 0.0004]}
+  batch_size:    {values: [16]}
+  hidden_dim:    {values: [128, 160]}
+  hidden_layers: {values: [3, 4]}
+  patience:      {values: [10, 12, 14]}
+

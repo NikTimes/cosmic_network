@@ -17,18 +17,22 @@ from pathlib import Path
 #  W&B sweep config  ➜  cfg.<param>
 # ───────────────────────────────────────────────────────────────
 wandb.init(
-    project="cmb_training",
-    name   ="sweep-run",                 # overridden by wandb agent
+    project="hyper_parameter_cmb",
+    # name   ="run",        
     config={
-        "epochs":        200,            # long overnight run
-        "batch_size":    32,
-        "learning_rate": 1e-3,
+        "epochs":        100,
+        "batch_size":    16,
+        "learning_rate": 2e-3,
         "hidden_dim":    128,
         "hidden_layers": 3,
-        "patience":      25              # early-stop patience
+        "patience":      12
     }
 )
 cfg = wandb.config
+run_name = wandb.run.name 
+
+WEIGHT_DIR = Path("hyper_weights")
+WEIGHT_DIR.mkdir(exist_ok=True)
 
 # parameters
 h5_path             = 'cmb_dataset.h5'
@@ -94,8 +98,8 @@ loss_fn   = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                optimizer, mode="min",
-               factor=0.1, patience=20,
-               min_lr=1e-6, verbose=True)
+               factor=0.1, patience=cfg.patience - 4,
+               min_lr=1e-6)
 
 best_val   = float("inf")
 epochs_no_improve = 0
@@ -135,14 +139,26 @@ for epoch in tqdm(range(cfg.epochs), desc="Training"):
         "lr":         lr_now
     })
 
-    # ---- Early stopping ---------------------------------------
-    if val_loss < best_val - 1e-6:          # tiny delta to avoid noise
+    # ---- Early stopping + best-model checkpoint -------------------
+    ckpt_path = WEIGHT_DIR / f"weights-{run_name}.pt"
+    
+    if val_loss < best_val - 1e-4:          # new best
         best_val = val_loss
         epochs_no_improve = 0
+    
+        torch.save({
+            "epoch":       epoch,
+            "model_state": model.state_dict(),
+            "opt_state":   optimizer.state_dict(),
+            "val_loss":    val_loss
+        }, ckpt_path)
+    
+        # upload to the run's Files tab
+        wandb.save(str(ckpt_path))
+    
     else:
         epochs_no_improve += 1
         if epochs_no_improve >= cfg.patience:
-            print(f"\nEarly stopping at epoch {epoch} (no improvement for {cfg.patience} epochs).")
+            print(f"\nEarly stopping at epoch {epoch}")
             break
-
         

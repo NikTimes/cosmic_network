@@ -120,3 +120,4 @@ class CMBdataset(torch.utils.data.Dataset):
        y = torch.tensor(log_cl, dtype=torch.float32)
 
        return x, y
+

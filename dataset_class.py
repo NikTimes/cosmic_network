@@ -7,7 +7,7 @@ import torch
 
 
 def build_dataset(
-        omega_b_range   = [0.001, 0.040],
+        omega_b_range   = [0.005, 0.040],
         omega_cdm_range = [0.001, 0.99],
         l_max           = 2500,
         num_points      = 10_000,        
@@ -48,8 +48,8 @@ def build_dataset(
             
             parameters  = {
                 
-                "Omega_b"       : omega_b, 
-                "Omega_cdm"     : omega_cdm, 
+                "omega_b"       : omega_b, 
+                "omega_cdm"     : omega_cdm, 
                 # "Omega_lambda"  : omega_lam,
                 "Omega_k"       : 0.0,
                 "h"             : 0.67810,
@@ -88,11 +88,13 @@ def build_dataset(
         
 class CMBdataset(torch.utils.data.Dataset):
     
-    def __init__(self, h5_path, ell_slice=None):
+    def __init__(self, h5_path, ell_slice=None, d_ell_val=True):
         
         self.h5_path    = h5_path
         self.ell_slice  = ell_slice  # optional: ℓ=2 to 800
         self._h5        = None
+        self._ell       = None
+        self.d_ell_val  = d_ell_val
         
     @property
     def h5(self):
@@ -102,6 +104,13 @@ class CMBdataset(torch.utils.data.Dataset):
         
         return self._h5
             
+    @property
+    def ell(self):
+        if self._ell is None:
+            self._ell = self.h5["ell"][:]        # copy once into RAM
+        return self._ell
+    
+    
     def __len__(self):
         return len(self.h5["omega_b"])
     
@@ -112,12 +121,180 @@ class CMBdataset(torch.utils.data.Dataset):
        omega_lambda = self.h5["omega_lambda"][index]
 
        log_cl       = self.h5["log_C_ell"][index]
+       ell          = self.ell
        
-       if self.ell_slice:
-           log_cl = log_cl[self.ell_slice]
+       if self.ell_slice is not None:
+            ell    = ell[self.ell_slice]
+            log_cl = log_cl[self.ell_slice]
+            
+       d_ell       = ell * (ell + 1.0) * np.exp(log_cl) / (2*np.pi)
            
-       x = torch.tensor([omega_b, omega_cdm], dtype=torch.float32)  
-       y = torch.tensor(log_cl, dtype=torch.float32)
+       x           = torch.tensor([omega_b, omega_cdm], dtype=torch.float32)  
+       
+       if self.d_ell_val: 
+           y       = torch.tensor(d_ell, dtype=torch.float32)
+       else:
+           y       = torch.tensor(log_cl, dtype=torch.float32)
 
+         
        return x, y
+
+
+class CMBdatasetV2(torch.utils.data.Dataset):
+    def __init__(self, h5_path, ell_slice=None,
+                 d_ell_val=False, in_ram=True):
+        """
+        Parameters
+        ----------
+        h5_path : str | Path
+        ell_slice : slice or None   # e.g. slice(2, 801)
+        d_ell_val : bool            # True → return ℓ(ℓ+1)Cℓ/2π
+        in_ram : bool               # True → materialise slice once
+        """
+        self.h5_path    = str(h5_path)
+        self.ell_slice  = ell_slice
+        self.d_ell_val  = d_ell_val
+        self.in_ram     = in_ram
+
+        self._h5 = None             # lazily opened per worker
+        self._ell = None
+
+        # ── RAM materialisation ───────────────────────────────────
+        if in_ram:
+            with h5py.File(self.h5_path, "r") as f:
+                # parameters
+                self._omega = torch.stack(
+                    [ torch.from_numpy(f["omega_b"][:]),
+                      torch.from_numpy(f["omega_cdm"][:]) ],
+                    dim=1).float()
+
+                # ell axis
+                ell = f["ell"][:]
+                if ell_slice is not None:
+                    ell = ell[ell_slice]
+                self._ell = torch.from_numpy(ell).float()
+
+                # log C_ℓ slice
+                self._logCl = torch.from_numpy(
+                    f["log_C_ell"][:, ell_slice][...]
+                ).float()
+
+    # -----------------------------------------------------------------
+    def _require_h5(self):
+        if self._h5 is None:
+            self._h5 = h5py.File(self.h5_path, "r", swmr=True)
+        return self._h5
+
+    def _require_ell(self):
+        if self._ell is None:
+            ell = self._require_h5()["ell"][:]
+            if self.ell_slice is not None:
+                ell = ell[self.ell_slice]
+            self._ell = torch.from_numpy(ell).float()
+        return self._ell
+
+    # -----------------------------------------------------------------
+    def __len__(self):
+        if self.in_ram:
+            return self._omega.shape[0]
+        return len(self._require_h5()["omega_b"])
+
+    def __getitem__(self, idx):
+        if self.in_ram:
+            x = self._omega[idx]
+            log_cl = self._logCl[idx]
+            ell = self._ell
+        else:
+            h5 = self._require_h5()
+            x = torch.tensor([h5["omega_b"][idx],
+                              h5["omega_cdm"][idx]], dtype=torch.float32)
+            log_cl = torch.from_numpy(
+                h5["log_C_ell"][idx, self.ell_slice]).float()
+            ell = self._require_ell()
+
+        if self.d_ell_val:
+            y = ell * (ell + 1.) * torch.exp(log_cl) / (2*np.pi)
+        else:
+            y = log_cl
+        return x, y
+    
+
+class CMBdatasetPCA(torch.utils.data.Dataset):
+    """
+    Dataset for PCA–compressed C_ℓ data.
+    Each sample:
+        x  – tensor (n_parameters,)      cosmological parameters
+        y  – tensor (n_components,)      PCA coefficients
+    The optional arguments ell_slice and d_ell_val are accepted so existing
+    training code does not break, but they are not used (PCA coeffs already
+    contain the ℓ information).
+    """
+    # -------------------------------------------------------------
+    def __init__(self, h5_path, ell_slice=None,
+                 d_ell_val=False, in_ram=True):
+        self.h5_path   = str(h5_path)
+        self.in_ram    = in_ram
+
+        self._h5       = None            # lazy handle for mmap mode
+        self.param_names = None          # filled below
+        
+        
+
+        if in_ram:
+            with h5py.File(self.h5_path, "r") as f:
+                # discover parameter list from file attributes
+                self.param_names = f.attrs["param_names"].split(",")
+
+                # load everything into RAM once
+                self._params = torch.stack(
+                    [torch.from_numpy(f[name][:])
+                     for name in self.param_names],
+                    dim=1).float()                          # (N, n_params)
+
+                self._coeff  = torch.from_numpy(
+                    f["coefficients"][:]).float()          # (N, n_components)
+        # store optional values but ignore them
+        self.ell_slice  = ell_slice
+        self.d_ell_val  = d_ell_val
+
+    # -------------------------------------------------------------
+    # lazy helpers for mmap mode ----------------------------------
+    def _require_h5(self):
+        if self._h5 is None:
+            self._h5 = h5py.File(self.h5_path, "r", swmr=True)
+            self.param_names = self._h5.attrs["param_names"].split(",")
+        return self._h5
+
+    # -------------------------------------------------------------
+    def __len__(self):
+        if self.in_ram:
+            return self._params.shape[0]
+        return len(self._require_h5()[self.param_names[0]])
+
+    def __getitem__(self, idx):
+        if self.in_ram:
+            x = self._params[idx]        # parameters
+            y = self._coeff[idx]         # PCA coefficients
+        else:
+            h5 = self._require_h5()
+            x = torch.tensor([h5[name][idx] for name in self.param_names],
+                             dtype=torch.float32)
+            y = torch.from_numpy(h5["coefficients"][idx]).float()
+        return x, y
+
+    # -------------------------------------------------------------
+    # optional utilities -----------------------------------------
+    def reconstruct_logCl(self, coeff_batch):
+        """
+        Reconstruct log‑C_ℓ curves from a batch of PCA coefficients.
+        coeff_batch : tensor (..., n_components)
+        returns      : tensor (..., n_ell)
+        """
+        h5 = self._require_h5() if not self.in_ram else None
+        basis = (torch.from_numpy(h5["basis"][:]).float()
+                 if h5 else self._basis)  # (_basis filled only if needed)
+        mean  = (torch.from_numpy(h5["mean_spectrum"][:]).float()
+                 if h5 else self._mean)
+
+        return coeff_batch @ basis + mean
 

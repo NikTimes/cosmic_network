@@ -1,0 +1,33 @@
+program: training_loopv5.2.py
+project: hyper_parameter_cmb_v10
+method: random
+
+metric:
+  name: val_loss
+  goal: minimize
+
+parameters:
+  # --- base training ---
+  learning_rate:
+    values: [0.0008, 0.0012, 0.0016, 0.0020]
+  batch_size:
+    values: [16, 32]
+  hidden_dim:
+    values: [64, 128, 192, 256]
+  hidden_layers:
+    values: [2, 3, 4]
+  patience:
+    values: [12, 16, 20]
+  epochs:
+    value: 100
+
+  # --- regularization ---
+  weight_decay:
+    values: [1e-6, 3e-6, 1e-5, 3e-5]   # CHANGED: narrowed to realistic AdamW range
+  grad_clip_norm:
+    values: [0.0, 1.0]                 # NEW: test with/without gradient clipping
+
+  # --- cosine annealing schedule ---
+  cosine_eta_min:
+    values: [1e-5, 3e-5]               # NEW: min LR at end of schedule
+

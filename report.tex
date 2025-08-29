@@ -274,7 +274,7 @@ $$
 \end{aligned}
 $$
 
-In practice we compute $\nabla_\theta J$ via \textbf{backpropagation}. Each step performs a forward pass to form predictions, computes the empirical risk against labels, backpropagates gradients, and updates parameters; an **epoch** is one full pass over the dataset, and training typically runs for multiple epochs.
+In practice we compute $\nabla_\theta J$ via \textbf{backpropagation}. Each step performs a forward pass to form predictions, computes the empirical risk against labels, backpropagates gradients, and updates parameters; an \textbf{epoch} is one full pass over the dataset, and training typically runs for multiple epochs.
 
 The general case replaces scalars with vectors and matrices. For a layer of width $d_j$, let $h_{j-1}\in\mathbb{R}^{d_{j-1}}$, $W_j\in\mathbb{R}^{d_j\times d_{j-1}}$, and $b_j\in\mathbb{R}^{d_j}$. The forward map is
 
@@ -287,92 +287,304 @@ where $\sigma_j$ acts elementwise, and training, losses, and gradien-based optim
 The true potential of neural networks as surrogates directly stems from this formulation: once trained, the neural network is capable of reproducing our desired mapping using element wise nonlinearactivations and basic matrix multiplication.
 Since these operations are highly optimized on modern hardware, evaluation using a NN compared to running full Bolztmann solvers becomes orders of magnitude faster. In theory, allowing for real-time predictions of the CMB power spectrum.
 
-\subsubsection{}
+\subsubsection{Training parameters relevant to this project}
+
+\textbf{Depth and Width}: How many layers and how many neurons per layer in the model. More complexity will capture better dynamics but comes with the risk of overfitting.  
+
+\textbf{Activation Functions}: Non-linear functions applied after each linear layer, they let the model learn curved relationships instead of just straight lines. Common choices include: 
+
+- $\mathrm{ReLU}(x)=\max(0,x)$. 
+- $\tanh$: Outputs in $(-1,1)$
+
+\textbf{Batch Size}: How many examples you process before taking one optimization step.
+
+\textbf{Learning Rate}: In the update step the scalar $\eta > 0$ controls the step size in parameter space. Too large → divergence; too small → slow, possibly stuck. Common practice: start with $\eta\in[10^{-4},10^{-2}]$
+
+\textbf{Learning Rate Scheduler}: Schedules change the value of the learning rate across epochs to avoid divergence or plateuing. Some schedulers might change according to some function for instance cosine or exponential. 
+
+\subsubsection{PCA}
+
+In practice, we could train a neural network to, given a set of inputs, output a range of $x$ values for the mapping we are trying to predict. 
+However, this approach comes with the cost of quickly becoming inefficient or even inaccurate when the output space is high-dimensional. 
+In the case of the CMB power spectrum, for instance, a network would have to predict hundreds if not thousands of multipoles simultaneously. While possible, this increases the complexity of the task and the risk of overfitting. 
+To reduce the dimensionality of the network output we apply \textbf{Principal Component Analysis (PCA)} to the spectra.
+
+PCA reduces the number of dimensions in large datasets by compressing the data to uncorrelated linear combinations of \textbf{principal components}. 
+These components are ordered by the amount of varience they capture, such that the first few components capture the dominant dynamics of variation in the data. 
+By projecting our spectra onto the leading $K$ components, we obtain a compact representation that preserves most of the information.
+This reduces the dimension of the network output significantly allowing it to learn $K$ coefficients instead of the full high-dimensional spectrum. 
+
+To construct PCA components we first center the dataset $X \in \mathbb{R}^{N \times d}$ by subtracting the mean $\mu$.
+We then compute the covariance matrix 
+\[
+C = \frac{1}{N} (X - \mu)^\top (X - \mu),
+\]
+and extract its eigenvectors $\{v_k\}$, which form the orthogonal \textbf{principal components}. 
+Projecting the data onto these directions yields the coefficients
+\[
+\alpha = (X - \mu)V,
+\]
+where $V$ is the matrix whose columns are the top $K$ eigenvectors. To reconstruct the data, we take
+\[
+\hat{X} = \alpha V^\top + \mu,
+\]
+which recovers an approximation of the original dataset using only the leading $K$ components.
+
 \section{methodology}
 \label{sec:methods}
 
 
-\subsection{Neural network diagram (TikZ)}
-\begin{figure}[H]
-  \centering
-  \begin{tikzpicture}[x=2.2em,y=2.2em]
-    % Nodes: 3 inputs, 4 hidden, 2 outputs
-    \foreach \i in {1,...,3} \node[input neuron]  (I\i) at (0,-\i) {};
-    \foreach \i in {1,...,4} \node[hidden neuron] (H\i) at (2,-\i+0.5) {};
-    \foreach \i in {1,...,2} \node[output neuron] (O\i) at (4,-\i-0.5) {};
-    % Connections
-    \foreach \i in {1,...,3} \foreach \j in {1,...,4} \draw[connect] (I\i) -- (H\j);
-    \foreach \i in {1,...,4} \foreach \j in {1,...,2} \draw[connect] (H\i) -- (O\j);
-    % Labels
-    \node[above] at (0,0.2) {\small Input};
-    \node[above] at (2,0.2) {\small Hidden};
-    \node[above] at (4,0.2) {\small Output};
-  \end{tikzpicture}
-  \caption{Feed-forward neural network diagram drawn with TikZ.}
-  \label{fig:nn}
-\end{figure}
+We constructed a CAMB-only, flat universe dataset by combining three Latin-hypercube-samplers consisting of Planck-like data (CORE), broad data (FULL), and an EDGE band biased to small $\Omega_{\Lambda} h^2$. 
+For each sample vector we used CAMB to compute the unlensed TT power spectra up to $\ell_{max}$ and stored it as $\log D_\ell$, then cleaned and merged splits. 
+We compressed spectra with PCA to $K \in {20, 50}$ components and trained an MLP to predict \textbf{standardized PCA coefficients} from four density parameters. 
+Training used AdamW with cosine annealing, gradient clipping and early stopping. 
+Evaluation reconstructs spectra from predicted coefficients and from it we report fractional-error metrics, peak shifts and percentile summaries on a withheld validation set. 
 
-% Tip: For more complex diagrams, define macros or consider dedicated TikZ packages; this simple example avoids extra dependencies.
+\subsection{Generating the dataset}
+\label{sec:data-gen}
 
-\subsection{Algorithm (pseudo-code)}
-\begin{algorithm}[H]
-\DontPrintSemicolon
-\KwIn{Dataset $\{(x^{(i)},y^{(i)})\}_{i=1}^N$, learning rate $\eta>0$}
-\KwOut{Trained parameters $\theta$}
-Initialize $\theta$ randomly\;
-\For{$t=1$ \KwTo $T$}{
-  Sample mini-batch $\mathcal{B}$\;
-  $g \leftarrow \nabla_{\theta} \frac{1}{|\mathcal{B}|}\sum_{(x,y)\in\mathcal{B}} \lVert f_{\theta}(x)-y\rVert^2$\;
-  $\theta \leftarrow \theta - \eta\, g$\;
-}
-\caption{Mini-batch gradient descent}
-\end{algorithm}
+\subsubsection{Sampling, Physicality amd Spectra Generation}
+\label{sec:data-gen}
 
-\subsection{A figure with PGFPlots}
-\begin{figure}[H]
-  \centering
-  \begin{tikzpicture}
-    \begin{axis}[
-      width=0.8\linewidth,
-      xlabel={$x$}, ylabel={$\sin x$},
-      grid=both
-    ]
-      \addplot+[domain=0:6.283, samples=200] {sin(deg(x))};
-    \end{axis}
-  \end{tikzpicture}
-  \caption{An example plot made with PGFPlots.}
-  \label{fig:plot}
-\end{figure}
+To create the dataset we first draw parameter quadruples $x=(\Omega_b h^2,\Omega_{\mathrm{cdm}} h^2,\Omega_\gamma h^2,\Omega_{\mathrm{ur}} h^2)$ 
+from three Latin-Hypercube Samplers \footnote{Latin–Hypercube Sampling ensures that each parameter dimension is divided into equiprobable intervals, with one sample drawn from each, thereby providing uniform coverage of the multidimensional parameter space than simple random sampling.}: \textsc{Core} (Planck-like box), \textsc{Full} (broad coverage), and \textbf{EDGE} uses the same box as FULL but selects candidates from the lowest 10\% in $\Omega_\Lambda h^2$ (quantile filter).
+
+\begin{table}[t]
+\centering
+\small
+\caption{Latin–Hypercube samplers: target cardinalities and parameter ranges.} 
+\label{tab:lhs-boxes}
+\begin{tabular}{l c c c c c}
+\toprule
+\textbf{Split} & \textbf{Samples} 
+& $\boldsymbol{\Omega_b h^2}$ 
+& $\boldsymbol{\Omega_{\mathrm{cdm}} h^2}$ 
+& $\boldsymbol{\Omega_\gamma h^2}$ 
+& $\boldsymbol{\Omega_{\mathrm{ur}} h^2}$ \\
+\midrule
+CORE & 30{,}000 
+& $[\num{0.020},\,\num{0.025}]$
+& $[\num{0.105},\,\num{0.135}]$
+& $[\num{2.45e-5},\,\num{2.50e-5}]$
+& $[\num{1.45e-5},\,\num{1.85e-5}]$ \\
+FULL & 15{,}000 
+& $[\num{0.010},\,\num{0.030}]$
+& $[\num{0.090},\,\num{0.160}]$
+& $[\num{2.40e-5},\,\num{2.60e-5}]$
+& $[\num{1.20e-5},\,\num{1.90e-5}]$ \\
+EDGE$^{\ast}$ & 15{,}000 
+& $[\num{0.010},\,\num{0.030}]$
+& $[\num{0.090},\,\num{0.160}]$
+& $[\num{2.40e-5},\,\num{2.60e-5}]$
+& $[\num{1.20e-5},\,\num{1.90e-5}]$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright
+\footnotesize $^{\ast}$EDGE: candidates are drawn from the FULL box, then filtered to the lowest 10\% in $\Omega_\Lambda h^2$ (edge quantile).
+\end{table}
+
+Flatness is imposed by computing:
+
+\[
+\Omega_\Lambda h^2 \;=\; h^2-\Omega_b h^2-\Omega_{\mathrm{cdm}} h^2-\Omega_\gamma h^2-\Omega_{\mathrm{ur}} h^2,
+\]
+and discarding samples with $\Omega_\Lambda<0$. In case a sample is discarded we resample until the target number of samples per split is reached. 
+
+For each accepted $x$ we run \textit{CAMB} (add CAMB parameters in appendix) to obtain the \emph{unlensed} TT power spectrum up to $\ell_{max} = 1000$ and store $d_\ell = \log{D_\ell}$ on a common $\ell$ grid ($\ell=2,\dots,\ell_{\max}$).
+All splits are cleaned for shape consistency and merged into a single HDF5 file with parameter columns, $\Omega_\Lambda$, the $\ell$ grid, and $d_\ell$.
+
+\subsubsection{Dimensionality Reduction with PCA} 
+
+From the merged dataset we extract $X \in \mathbb{R}^{N \times L}$ which collects the $L = \ell_{\text{max}} - 1$ values of all $(N)$ $d_\ell$ samples.
+Applying PCA with \(K\in\{20,50\}\) to the column–centered \(X\) yields, for each sample, a coefficient vector \(\alpha_i\in\mathbb{R}^K\), together with the mean spectrum \(\mu\in\mathbb{R}^{L}\) and the PCA basis \(B\in\mathbb{R}^{K\times L}\).
+The associated eigenvalues $\lambda_k$ quantify the variance explained by each component. 
+
+For training we use standardized scores \(\tilde\alpha_{ik}=\alpha_{ik}/\sqrt{\lambda_k}\); accordingly, 
+we write an HDF5 PCA dataset (per \(K\in\{20,50\}\)) containing: \texttt{parameter columns}, \texttt{coefficient vectors},  \texttt{basis} \(B\), \texttt{mean\_spectrum} \(\mu\), \texttt{explained\_variance} \(\lambda\), the \(\ell\)-grid, and the (standardized) \texttt{coefficients} \(\tilde\alpha\) used by the training dataloader. 
+Once trained, model-predicted coefficients are mapped back to a log–spectrum via 
+
+\begin{equation}
+  \widehat{d} \;=\; \mu \;+\; B^\top
+  \big(\widehat{\tilde{\alpha}}\odot\sqrt{\lambda}\big),
+  \qquad \widehat{d}\in\mathbb{R}^{L}.
+\end{equation}
+
+\subsection{Surrogate Model}
+\label{sec:surrogate}
+
+Having defined the inputs (omega densities) and targets (PCA coefficients) we can adopt a fully-connected multilayer perceptron 
+$f_\theta:\mathbb{R}^4\to\mathbb{R}^K$ that maps the four density parameters $(\Omega_b h^2, \Omega_{\mathrm{cdm}} h^2, \Omega_\gamma h^2, \Omega_{\mathrm{ur}} h^2)$ 
+to the standardized PCA coefficients $\tilde\alpha\in\mathbb{R}^K$. 
+
+The network is composed of $L$ hidden layers of width $d$, each followed by a smooth, learnable activation function.
+
+\begin{equation}
+  f(x) \;=\; 
+  \Big( \gamma \;+\; \sigma(-\beta \odot x)\,(1-\gamma) \Big) \odot x,
+  \qquad 
+  \sigma(z) = \frac{1}{1+e^{-z}} ,
+\end{equation}
+
+
+This activation is parameterized by $(\beta, \gamma)$ per layer and interpolates between linear unit and a gated nonlinearity, 
+hence allowing the network to adaptively choose the degree of non-linearity per layer.  
+The final output ensures that the predicted coefficients span  $\mathbb{R}^K$. 
+
+
+\subsubsection{Training}
+
+We train our MLP on standardized coefficients with mean squared error.
+
+\[
+\mathcal{L}(\theta)=\frac{1}{NK}\sum_{i=1}^N\sum_{k=1}^K 
+\left(f_\theta(x^{(i)})_k-\tilde\alpha^{(i)}_k\right)^2.
+\]
+
+We optimize this loss using the AdamW optimizer with a cosine–annealed learning rate schedule. 
+To stabilize training we apply gradient clipping and monitor the validation loss%
+\footnote{During training the dataset is split into a training set, used to update the weights, and a validation set, 
+used only for monitoring generalization and triggering early stopping. 
+A separate test set is held out entirely and used exclusively for final evaluation.} 
+for early stopping. 
+
+To identify the most effective configuration for our MLP we conducted a systematic hyperparameter sweep.
+The sweep explores discrete sets of candidate values for key training parameters such as: learning rate,
+batch size, hidden layer width, and number of layers. 
+Each configuration is then trained with identical conditions (same dataset, loss and optimizer) and evaluated on 
+the test set using the metrics defined in \cref{sec:metrics}.
+
+
+\begin{table}[H]
+\centering
+\caption{Hyperparameters and candidate values explored in the sweep (from \texttt{hyperparam\_5.yaml}).}
+\label{tab:sweep}
+\begin{tabular}{lc}
+\toprule
+\textbf{Hyperparameter} & \textbf{Candidate Values} \\
+\midrule
+Learning rate & $\{8\times 10^{-4},\,1.2\times 10^{-3},\,1.6\times 10^{-3},\,2.0\times 10^{-3}\}$ \\
+Batch size & $\{16,\,32\}$ \\
+Hidden layer width ($d$) & $\{64,\,128,\,192,\,256\}$ \\
+Number of hidden layers ($L$) & $\{2,\,3,\,4\}$ \\
+Weight decay & $\{1\times 10^{-6},\,3\times 10^{-6},\,1\times 10^{-5},\,3\times 10^{-5}\}$ \\
+Gradient clipping norm & $\{0.0,\,1.0\}$ \\
+Cosine annealing minimum LR & $\{1\times 10^{-5},\,3\times 10^{-5}\}$ \\
+Early stopping patience & $\{12,\,16,\,20\}$ \\
+Epochs & $100$ (fixed) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Testing and Evaluation}
+\label{sec:metrics}
+
+Once trainins is complete, the surrogate network is evaluated on a \textbf{held–out test set} 
+consisting of parameter samples and corresponding spectra generated with \texttt{CAMB}. 
+This dataset is entirely disjoint from both the training and validation sets, ensuring an unbiased measure of generalization.
+
+In line with \textsc{CosmoPower}~\cite{SpurioMancini2021}, 
+We evaluate the surrogate performance by directly reconstructing spectra from predicted PCA components.
+We report \textbf{absolute percentage errors}. For each multipole $\ell$ we compute
+
+\[
+|\epsilon_\ell| = 100 \cdot \left| \frac{\widehat{C}_\ell - C_\ell}{C_\ell} \right|,
+\]
+
+We then summarize $\{|\epsilon_\ell|\}$ using the mean, median, 95th percentile (p95), 99th percentile (p99), and maximum error.
+
+\subsubsection{Parameter–sensitivity Validation}
+
+Beyond per-multipole error summaries, we asses the surrogate's usability in parameter inference.
+First, we generate maps of error statistics as functions of cosmological parameters,
+thereby visualizing where in parameter space the surrogate is most accurate.
+
+Second, we perform end-to-end parameter recovery tests: synthetic with \texttt{CAMB} 
+are analysed with \texttt{CAMB} an MCMC pipeline using the surrogate in place of \texttt{CAMB}. 
+The results are then compared against the ground-truth
+
+Finally we compute Fisher information matrices using both \texttt{CAMB} and the surrogate and veryfy constistency
+in predicted parameter uncertainties. These tests are not only a measurement of pointwise accuracy of the surrogate but also 
+are a test of the reliability of the model as a useful real-time cosmological parameter estimator. 
+
+
 
 \section{Results}
 \label{sec:results}
+\subsection{Evaluation on Test Set}
 
-\subsection{Tables}
-Use \texttt{booktabs} for clean tables. \texttt{siunitx} aligns numbers by decimal separator.
-\begin{table}[H]
-  \centering
-  \caption{Example results table.}
-  \label{tab:results}
-  \begin{tabular}{l S[table-format=1.3] S[table-format=1.3]}
-    \toprule
-    {Model} & {MSE $\downarrow$} & {Accuracy (\%)} \\
-    \midrule
-    Baseline  & 0.145 & 78.2 \\
-    ResNet    & 0.092 & 84.5 \\
-    Ours      & 0.054 & 88.7 \\
-    \bottomrule
-  \end{tabular}
+We compute three test datasets of size $10^4$ each (CORE, FULL EDGE), sampled using LHS over the parameter boxes Table~\ref{tab:lhs-boxes}
+and subject to the same Flatness constraints.
+For every test parameter vector, the surrogate predicts PCA components that are mapped into $D_\ell$ for comparison
+the corresponding \texttt{CAMB} spectra produced with the same parameters.
+Accuracy is evaluated as described in \cref{sec:metrics}.
+
+For each test spectrum $i$ we first form per–multipole absolute percentage errors
+$|\epsilon_{i,\ell}| = 100\,|\widehat{C}_{i,\ell} - C_{i,\ell}|/C_{i,\ell}|$
+and summarize across $\ell$ to obtain the tuple
+
+\[
+s_i \;=\; \big(\mathrm{mean}_\ell\,|\epsilon_{i,\ell}|,\;
+              \mathrm{median}_\ell\,|\epsilon_{i,\ell}|,\;
+              \mathrm{p95}_\ell\,|\epsilon_{i,\ell}|,\;
+              \mathrm{p99}_\ell\,|\epsilon_{i,\ell}|,\;
+              \max_\ell\,|\epsilon_{i,\ell}|\big).
+\]
+
+Given the collection $\{s_i\}_{i=1}^{N}$ we report accross-dataset summaries by taking, for each component of $s_i$, the median across spectra.
+Thus an entry such as "Mean" in Table~\ref{tab:test-summary} corresponds to the median accross the mean absolute error of all test vectors. 
+ 
+\begin{table}[t]
+\centering
+\small
+\caption{Summary of surrogate errors (absolute percentage error $|\epsilon_\ell|$) on the three held--out test sets (10k samples each).
+We report the mean, median, 95th percentile (p95), 99th percentile (p99), and maximum error across all multipoles and samples, 
+for models trained on $K=20$ and $K=50$ PCA components.}
+\label{tab:test-summary}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Test Set} & \textbf{Model} 
+& \textbf{Mean} & \textbf{Median} & \textbf{p95} & \textbf{p99} & \textbf{Max} \\
+\midrule
+CORE & PCA--20 & -- & -- & -- & -- & -- \\
+     & PCA--50 & -- & -- & -- & -- & -- \\
+\midrule
+FULL & PCA--20 & -- & -- & -- & -- & -- \\
+     & PCA--50 & -- & -- & -- & -- & -- \\
+\midrule
+EDGE & PCA--20 & -- & -- & -- & -- & -- \\
+     & PCA--50 & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
 \end{table}
 
-\subsection{Code listing}
-\begin{lstlisting}[language=Python,caption={PyTorch-style training step.}]
-# Pseudocode
-optimizer.zero_grad()
-preds = model(x)
-loss = torch.nn.functional.mse_loss(preds, y)
-loss.backward()
-optimizer.step()
-\end{lstlisting}
+(Add examples with error of both models with samples from three datasets)
+
+\subsection{MCMC parameter inference}
+\label{sec:mcmc}
+
+To asses scientific usability beyond pointwise error,
+we replace the Boltzmann solver with the surrogate in 
+a standard Bayesian pipeline and test recovery of ground 
+truth cosmological parameters.
+
+From our held--out set we select the sample whose $(\Omega_b h^2,\Omega_{\rm cdm} h^2,\Omega_\gamma h^2,\Omega_{\rm ur} h^2)$ is closest (in Euclidean norm) to a Planck--like vector $\theta_\star$. Its TT spectrum $D_\ell^{\rm obs}$ (with $\ell=2\!:\!1000$) plays the role of the observed sky.
+
+Given a parameter proposal $\theta=(\Omega_b h^2,\Omega_{\rm cdm} h^2,\Omega_\gamma h^2,\Omega_{\rm ur} h^2)$, , the network predicts PCA coefficients, reconstructs the log-spectrum, and returns $D_\ell(\theta)$ for likelihood evaluation.
+
+We adopt a Gaussian bandpower likelihood with cosmic--variance covariance (TT--only; $f_{\rm sky}=0.6$; no instrument noise by default):
+\[
+\mathrm{Var}(D_\ell)=\frac{2}{(2\ell+1)f_{\rm sky}}\big(D_\ell+N_\ell^D\big)^2,\qquad N_\ell^D=0,
+\]
+and flat box priors on each parameter spanning the dataset ranges (with a small safety margin). The log--posterior is
+\[
+\ln p(\theta\mid D^{\rm obs}) \;=\; -\tfrac12\sum_\ell
+\left[\frac{(D_\ell^{\rm obs}-D_\ell(\theta))^2}{\mathrm{Var}(D_\ell)}+\ln\!\big(2\pi\,\mathrm{Var}(D_\ell)\big)\right]
+\;+\;\ln p(\theta).
+\]
+We run MCMC with (\texttt{emcee}), initializing walkers in a small Gaussian ball around $\theta_\star$ and thinning after burn-in.
 
 \section{Discussion}
 Discuss implications. For cosmology, see e.g. \citep{planck2018parameters,camb}.

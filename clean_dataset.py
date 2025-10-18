@@ -20,9 +20,9 @@ def clean_dataset(in_path, out_path, param_names, ell_keep=999):
             data = dset[:]
 
             if name == "d_ell":
-                data = data[:, :ell_keep]   # 🔥 truncate spectra
+                data = data[:, :ell_keep]  
             if name == "ell":
-                data = dset[:ell_keep]      # 🔥 keep first 999 ℓ values
+                data = dset[:ell_keep]      
 
             if data.shape[0] == fin[param_names[0]].shape[0]:
                 fout.create_dataset(name, data=data[idx], compression='gzip', compression_opts=6)
@@ -69,12 +69,12 @@ def merge_dataset(file1, file2, output_file):
             # Skip for ell
             if key == 'ell':
                 fout.create_dataset(key, data=d1)
-                print(f"✔ Copied '{key}' without merging: shape {d1.shape}")
+                print(f"Copied '{key}' without merging: shape {d1.shape}")
                 continue
             
             merged = np.concatenate([d1, d2], axis = 0)
             fout.create_dataset(key, data=merged)
-            print(f"✔ Merged '{key}': {d1.shape} + {d2.shape} → {merged.shape}")  
+            print(f"Merged '{key}': {d1.shape} + {d2.shape} → {merged.shape}")  
             
 
 def pca_component(in_path, out_path, n_components, param_names, ell_slice=None):
